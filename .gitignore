@@ -1,0 +1,6 @@
+# Secrets
+credentials.json
+token.json
+
+# SQLite
+*.db

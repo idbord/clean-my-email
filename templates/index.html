@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>Email Dashboard</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/date-fns@2.29.3/dist/date-fns.min.js"></script>
+    <script
+        src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@2.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
+</head>
+
+<body>
+    <div style="width: 80%; margin: auto; margin-top: 50px;">
+        <h1>Emails Received</h1>
+        <div style="margin-bottom: 10px;">
+            <input type="radio" id="action_delete" name="action" value="delete" checked>
+            <label for="action_delete">Delete</label>
+            <input type="radio" id="action_mark_read" name="action" value="mark_read">
+            <label for="action_mark_read">Mark as Read</label>
+        </div>
+        <div style="margin-bottom: 10px;">
+            <label for="start_date">Start Date:</label>
+            <input type="date" id="start_date">
+            <label for="end_date">End Date:</label>
+            <input type="date" id="end_date">
+            <label for="sender_email">Sender Email:</label>
+            <input type="text" id="sender_email" list="sender_emails_list">
+            <datalist id="sender_emails_list"></datalist>
+            <button id="filter_button">Filter</button>
+        </div>
+        <div style="margin-bottom: 10px;">
+            <input type="checkbox" id="exclude_starred">
+            <label for="exclude_starred">Exclude Starred</label>
+            <input type="checkbox" id="exclude_important">
+            <label for="exclude_important">Exclude Important</label>
+            <input type="checkbox" id="exclude_personal">
+            <label for="exclude_personal">Exclude Personal</label>
+            <input type="checkbox" id="exclude_read">
+            <label for="exclude_read">Exclude Read</label>
+        </div>
+
+        <button id="delete_selected_button">Modify Selected Emails</button>
+    </div>
+
+    <div style="width: 80%; margin: auto; margin-top: 50px;">
+        <canvas id="emails_received_chart"></canvas>
+    </div>
+    <div style="width: 80%; margin: auto; margin-top: 50px;">
+        <canvas id="emails_per_sender_chart"></canvas>
+    </div>
+
+    <div style="width: 80%; margin: auto; margin-top: 50px;">
+        <h2>Email List</h2>
+        <table id="email_table" border="1" style="width:100%; border-collapse: collapse;">
+            <thead>
+                <tr>
+                    <th>Sender Name</th>
+                    <th>Sender Email</th>
+                    <th>Subject</th>
+                    <th>Received On</th>
+                </tr>
+            </thead>
+            <tbody>
+                <!-- Email data will be inserted here -->
+            </tbody>
+        </table>
+    </div>
+
+    <script>
+        const emailsReceivedCtx = document.getElementById('emails_received_chart').getContext('2d');
+        const emailsPerSenderCtx = document.getElementById('emails_per_sender_chart').getContext('2d');
+        const deleteSelectedButton = document.getElementById('delete_selected_button');
+        const emailTableBody = document.querySelector('#email_table tbody');
+
+        let emailsReceivedChart, emailsPerSenderChart;
+
+        function createCharts(data) {
+            if (emailsReceivedChart) {
+                emailsReceivedChart.destroy();
+            }
+            console.log(data);
+            emailsReceivedChart = new Chart(emailsReceivedCtx, {
+                type: 'line', // Changed to line graph
+                data: {
+                    labels: data.emails_received.labels,
+                    datasets: [{
+                        label: 'Emails Received (Cumulative)',
+                        data: data.emails_received.data,
+                        borderColor: 'rgba(75, 192, 192, 1)', // Line color
+                        borderWidth: 1,
+                        fill: false, // No fill under the line
+                        tension: 0.4 // Smooth curves
+                    }]
+                },
+                options: {
+                    scales: {
+                        x: {
+                            type: 'time',
+                            time: {
+                                unit: 'day'
+                            },
+                            distribution: 'series' // Ensure continuous distribution
+                        },
+                        y: {
+                            beginAtZero: true
+                        }
+                    }
+                }
+            });
+
+            if (emailsPerSenderChart) {
+                emailsPerSenderChart.destroy();
+            }
+            emailsPerSenderChart = new Chart(emailsPerSenderCtx, {
+                type: 'bar',
+                data: {
+                    labels: data.emails_per_sender.labels,
+                    datasets: [{
+                        label: 'Emails per Sender',
+                        data: data.emails_per_sender.data,
+                        backgroundColor: 'rgba(153, 102, 255, 0.2)',
+                        borderColor: 'rgba(153, 102, 255, 1)',
+                        borderWidth: 1
+                    }]
+                },
+                options: {
+                    onClick: (evt) => {
+                        const points = emailsPerSenderChart.getElementsAtEventForMode(evt, 'nearest', { intersect: true }, true);
+                        if (points.length) {
+                            const firstPoint = points[0];
+                            const label = emailsPerSenderChart.data.labels[firstPoint.index];
+                            navigator.clipboard.writeText(label).then(() => {
+                                alert(`Copied "${label}" to clipboard`);
+                            }).catch(err => {
+                                console.error('Could not copy text: ', err);
+                                alert('Failed to copy email to clipboard.');
+                            });
+                        }
+                    },
+                    scales: {
+                        y: {
+                            beginAtZero: true
+                        }
+                    }
+                }
+            });
+        }
+
+        async function fetchData() {
+            const startDate = document.getElementById('start_date').value;
+            const endDate = document.getElementById('end_date').value;
+            const senderEmail = document.getElementById('sender_email').value;
+            const excludeStarred = document.getElementById('exclude_starred').checked;
+            const excludeImportant = document.getElementById('exclude_important').checked;
+            const excludePersonal = document.getElementById('exclude_personal').checked;
+            const excludeRead = document.getElementById('exclude_read').checked;
+
+            console.log('Applying Filters:', {
+                startDate,
+                endDate,
+                senderEmail,
+                excludeStarred,
+                excludeImportant,
+                excludePersonal,
+                excludeRead
+            });
+
+            let url = '/data?';
+            if (startDate) url += `start_date=${startDate}&`;
+            if (endDate) url += `end_date=${endDate}&`;
+            if (senderEmail) url += `sender_email=${senderEmail}&`;
+            if (excludeStarred) url += `exclude_starred=${excludeStarred}&`;
+            if (excludeImportant) url += `exclude_important=${excludeImportant}&`;
+            if (excludePersonal) url += `exclude_personal=${excludePersonal}&`;
+            if (excludeRead) url += `exclude_read=${excludeRead}&`;
+            url = url.slice(0, -1); // Remove trailing '&'
+            console.log('Fetching data from URL:', url);
+
+            const response = await fetch(url);
+            const data = await response.json();
+            console.log(data);
+            createCharts(data);
+            fetchEmailsAndPopulateTable(data.emails); // Call to fetch and populate table
+        }
+
+        async function fetchEmailsAndPopulateTable(emails) {
+            emailTableBody.innerHTML = ''; // Clear existing rows
+            const excludeStarred = document.getElementById("exclude_starred").checked;
+            const excludeImportant = document.getElementById("exclude_important").checked;
+            const excludePersonal = document.getElementById("exclude_personal").checked;
+            const excludeRead = document.getElementById("exclude_read").checked;
+
+            emails.forEach(email => {
+                if (excludeStarred && email.is_starred === 1) {
+                    return; // Skip starred emails if filter is active
+                }
+                if (excludeImportant && email.is_important === 1) {
+                    return; // Skip important emails if filter is active
+                }
+                if (excludePersonal && email.is_personal === 1) {
+                    return; // Skip personal emails if filter is active
+                }
+                if (excludeRead && email.is_read === 1) {
+                    return; // Skip read emails if filter is active
+                }
+                const row = emailTableBody.insertRow();
+                const checkboxCell = row.insertCell();
+                const checkbox = document.createElement('input');
+                checkbox.type = 'checkbox';
+                checkbox.className = 'email-checkbox';
+                checkbox.value = email.id;
+                checkbox.checked = true; // Auto-select
+                checkboxCell.appendChild(checkbox);
+                row.insertCell().textContent = email.sender_name;
+                row.insertCell().textContent = email.sender_email;
+                row.insertCell().textContent = email.subject;
+                row.insertCell().textContent = new Date(parseInt(email.received_on)).toLocaleString();
+            });
+        }
+
+        async function fetchSenders() {
+            const response = await fetch('/senders');
+            const senders = await response.json();
+            const senderDatalist = document.getElementById('sender_emails_list');
+            senderDatalist.innerHTML = '<option value="all">All</option>';
+            senders.forEach(sender => {
+                const option = document.createElement('option');
+                option.value = sender;
+                senderDatalist.appendChild(option);
+            });
+        }
+
+        document.getElementById('filter_button').style.display = 'none'; // Hide the filter button
+
+        document.getElementById('start_date').addEventListener('change', fetchData);
+        document.getElementById('end_date').addEventListener('change', fetchData);
+        document.getElementById('sender_email').addEventListener('input', fetchData);
+        document.getElementById('exclude_starred').addEventListener('change', fetchData);
+        document.getElementById('exclude_important').addEventListener('change', fetchData);
+        document.getElementById('exclude_personal').addEventListener('change', fetchData);
+        document.getElementById('exclude_read').addEventListener('change', fetchData);
+
+        deleteSelectedButton.addEventListener('click', async () => {
+            console.log('Delete Selected Emails Button Clicked');
+            const selectedEmails = Array.from(document.querySelectorAll('.email-checkbox:checked')).map(cb => cb.value);
+            const action = document.querySelector('input[name="action"]:checked').value;
+            console.log('Selected Emails for Deletion:', selectedEmails);
+
+            if (selectedEmails.length === 0) {
+                alert('No emails selected for deletion.');
+                return;
+            }
+
+            if (confirm(`Are you sure you want to ${action} ${selectedEmails.length} selected emails?`)) {
+                const response = await fetch('/delete_emails', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ ids: selectedEmails, action: action })
+                });
+
+                const result = await response.json();
+                if (response.ok) {
+                    alert(result.message);
+                    fetchData();
+                    fetchSenders();
+                } else {
+                    alert(`Error: ${result.error}`);
+                }
+                // clear sender email input
+                document.getElementById('sender_email').value = '';
+                await fetchData();
+            }
+        });
+
+        fetchData();
+        fetchSenders();
+    </script>
+</body>
+
+</html>
